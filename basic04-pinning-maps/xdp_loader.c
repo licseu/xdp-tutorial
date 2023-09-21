@@ -111,11 +111,60 @@ int pin_maps_in_bpf_object(struct bpf_object *bpf_obj, const char *subdir)
 
 	return 0;
 }
+static inline struct xdp_program *load_bpf_and_pin_maps(struct config *cfg)
+{
+	/* In next assignment this will be moved into ../common/ */
+	int prog_fd = -1;
+	int err;
+	struct bpf_object * obj;
+
+	DECLARE_LIBBPF_OPTS(bpf_object_open_opts, opts);
+	DECLARE_LIBXDP_OPTS(xdp_program_opts, xdp_opts, 0);
+
+	xdp_opts.open_filename = cfg->filename;
+	xdp_opts.prog_name = cfg->progname;
+	xdp_opts.opts = &opts;
+
+	/* If flags indicate hardware offload, supply ifindex */
+	/* if (cfg->xdp_flags & XDP_FLAGS_HW_MODE) */
+	/* 	offload_ifindex = cfg->ifindex; */
+
+	struct xdp_program *prog = xdp_program__create(&xdp_opts);
+	err = libxdp_get_error(prog);
+	if (err) {
+		fprintf(stderr, "ERR: loading program \n");
+		exit(EXIT_FAIL_BPF);
+	}
+	obj = xdp_program__bpf_obj(prog);
+	if (!obj) {
+		fprintf(stderr, "ERR: loading obj from prog\n");
+		exit(EXIT_FAIL_BPF);
+	}
+	char map_filename[PATH_MAX];
+	int len = snprintf(map_filename, PATH_MAX, "%s/%s/%s",
+		       pin_basedir, cfg->ifname, map_name);
+	if (len < 0) {
+		fprintf(stderr, "ERR: creating map_name\n");
+		return EXIT_FAIL_OPTION;
+	}
+	int pinned_map_fd = bpf_obj_get(map_filename);
+	struct bpf_map    *map = bpf_object__find_map_by_name(obj, "xdp_stats_map");
+	bpf_map__reuse_fd(map, pinned_map_fd);
+
+	err = xdp_program__attach(prog, cfg->ifindex, cfg->attach_mode, 0);
+	if (err)
+		exit(err);
+
+	prog_fd = xdp_program__fd(prog);
+	if (prog_fd < 0) {
+		fprintf(stderr, "ERR: xdp_program__fd failed: %s\n", strerror(errno));
+		exit(EXIT_FAIL_BPF);
+	}
+	return prog;
+}
 
 int main(int argc, char **argv)
 {
-	struct xdp_program *program;
-	int err;
 
 	struct config cfg = {
 		.attach_mode = XDP_MODE_NATIVE,
@@ -138,7 +187,9 @@ int main(int argc, char **argv)
 		/* return xdp_link_detach(cfg.ifindex, cfg.xdp_flags, 0); */
 	}
 
-	program = load_bpf_and_xdp_attach(&cfg);
+	struct xdp_program *program;
+	int err;
+	program = load_bpf_and_pin_maps(&cfg);
 	if (!program)
 		return EXIT_FAIL_BPF;
 
@@ -147,13 +198,6 @@ int main(int argc, char **argv)
 		       cfg.filename, cfg.progname);
 		printf(" - XDP prog attached on device:%s(ifindex:%d)\n",
 		       cfg.ifname, cfg.ifindex);
-	}
-
-	/* Use the --dev name as subdir for exporting/pinning maps */
-	err = pin_maps_in_bpf_object(xdp_program__bpf_obj(program), cfg.ifname);
-	if (err) {
-		fprintf(stderr, "ERR: pinning maps\n");
-		return err;
 	}
 
 	return EXIT_OK;

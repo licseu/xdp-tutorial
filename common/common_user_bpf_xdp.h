@@ -14,5 +14,6 @@ int open_bpf_map_file(const char *pin_dir,
 		      const char *mapname,
 		      struct bpf_map_info *info);
 int do_unload(struct config *cfg);
+struct bpf_object *load_bpf_object_file_reuse_maps(const char *file, int ifindex, const char *pin_dir);
 
 #endif /* __COMMON_USER_BPF_XDP_H */

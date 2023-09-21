@@ -5,7 +5,9 @@
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 #include <linux/ipv6.h>
+#include <linux/icmp.h>
 #include <linux/icmpv6.h>
+#include <linux/ip.h>
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 /* Defines xdp_stats_map from packet04 */
@@ -16,6 +18,42 @@
 struct hdr_cursor {
 	void *pos;
 };
+static __always_inline int parse_iphdr(struct hdr_cursor *nh,
+					void *data_end,
+					struct iphdr **ip_hdr)
+{
+	struct iphdr *ip = nh->pos;
+	int hdrsize = sizeof(*ip);
+	if (nh->pos + hdrsize > data_end) {
+		return -1;
+	}
+	if (nh->pos + ip->ihl*4 > data_end) {
+		return -1;
+	}
+	if (bpf_ntohs(ip->tot_len) > (data_end - nh->pos)) {
+		return -1;
+	}
+	nh->pos += ip->ihl*4;
+	*ip_hdr = ip;
+	return ip->protocol;
+}
+
+static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
+					void *data_end,
+					struct icmphdr **icmp_hdr)
+{
+    struct icmphdr *icmp;
+    int hdrsize = sizeof(struct icmphdr);
+
+    if (nh->pos + hdrsize > data_end)
+        return -1;
+
+    icmp = nh->pos;
+    nh->pos += sizeof(struct icmphdr);
+
+    *icmp_hdr = icmp;
+    return icmp->type;
+}
 
 /* Packet parsing helpers.
  *
@@ -36,7 +74,7 @@ static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
 	/* Byte-count bounds check; check if current pointer + size of header
 	 * is after data_end.
 	 */
-	if (nh->pos + 1 > data_end)
+	if (nh->pos + hdrsize > data_end)
 		return -1;
 
 	nh->pos += hdrsize;
@@ -84,12 +122,35 @@ int  xdp_parser_func(struct xdp_md *ctx)
 	 * header type in the packet correct?), and bounds checking.
 	 */
 	nh_type = parse_ethhdr(&nh, data_end, &eth);
-	if (nh_type != bpf_htons(ETH_P_IPV6))
+	if (nh_type < 0) {
+		action = XDP_ABORTED; 
+		goto out;
+	}
+	if (nh_type != bpf_htons(ETH_P_IP))
 		goto out;
 
+	struct iphdr *ip;
+	int nh_proto;
 	/* Assignment additions go below here */
+	nh_proto = parse_iphdr(&nh, data_end, &ip);
+	if (nh_proto < 0) {
+		action = XDP_ABORTED; 
+		goto out;
+	}
+	if (nh_proto != IPPROTO_ICMP) {
+		goto out;
+	}
 
-	action = XDP_DROP;
+	struct icmphdr *icmp;
+	int nh_icmptype;
+	nh_icmptype = parse_icmphdr(&nh, data_end, &icmp);
+	if (nh_icmptype < 0) {
+		action = XDP_ABORTED; 
+		goto out;
+	}
+	if (nh_icmptype == ICMP_ECHOREPLY)
+		action = XDP_DROP;
+
 out:
 	return xdp_stats_record_action(ctx, action); /* read via xdp_stats */
 }

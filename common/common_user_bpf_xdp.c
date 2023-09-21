@@ -50,28 +50,17 @@ static int reuse_maps(struct bpf_object *obj, const char *path)
 	return 0;
 }
 
-#if 0
 struct bpf_object *load_bpf_object_file_reuse_maps(const char *file,
 						   int ifindex,
 						   const char *pin_dir)
 {
-	int err;
-	struct bpf_object *obj;
+	int pinned_map_fd = bpf_obj_get(pin_dir);
+	struct bpf_object *obj = bpf_object__open(file);
+	struct bpf_map    *map = bpf_object__find_map_by_name(obj, "xdp_stats_map");
+	bpf_map__reuse_fd(map, pinned_map_fd);
 
-	obj = open_bpf_object(file, ifindex);
-	if (!obj) {
-		fprintf(stderr, "ERR: failed to open object %s\n", file);
-		return NULL;
-	}
 
-	err = reuse_maps(obj, pin_dir);
-	if (err) {
-		fprintf(stderr, "ERR: failed to reuse maps for object %s, pin_dir=%s\n",
-				file, pin_dir);
-		return NULL;
-	}
-
-	err = bpf_object__load(obj);
+	int err = bpf_object__load(obj);
 	if (err) {
 		fprintf(stderr, "ERR: loading BPF-OBJ file(%s) (%d): %s\n",
 			file, err, strerror(-err));
@@ -80,7 +69,6 @@ struct bpf_object *load_bpf_object_file_reuse_maps(const char *file,
 
 	return obj;
 }
-#endif
 
 struct xdp_program *load_bpf_and_xdp_attach(struct config *cfg)
 {

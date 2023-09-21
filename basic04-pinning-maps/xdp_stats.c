@@ -38,6 +38,7 @@ static const struct option_wrapper long_options[] = {
 	{{0, 0, NULL,  0 }}
 };
 
+static int old_map_id;
 #define NANOSEC_PER_SEC 1000000000 /* 10^9 */
 static __u64 gettime(void)
 {
@@ -180,7 +181,7 @@ static bool map_collect(int fd, __u32 map_type, __u32 key, struct record *rec)
 	return true;
 }
 
-static void stats_collect(int map_fd, __u32 map_type,
+static int stats_collect(int map_fd, __u32 map_type,
 			  struct stats_record *stats_rec)
 {
 	/* Collect all XDP actions stats  */
@@ -191,24 +192,72 @@ static void stats_collect(int map_fd, __u32 map_type,
 	}
 }
 
-static void stats_poll(int map_fd, __u32 map_type, int interval)
+static inline bool detect_new_map_id(int *map_fd, char *pin_dir) 
+{ 
+	int new_fd;
+	int err;
+	struct bpf_map_info map_expect = { 0 };
+	struct bpf_map_info info = { 0 };
+	new_fd = open_bpf_map_file(pin_dir, "xdp_stats_map", &info);
+	if (new_fd < 0) {
+		return false;
+	}
+	printf("new fd is%x, info.id%d\n", new_fd, info.id);
+	if (old_map_id == info.id) {
+		return false;
+	}
+
+	/* check map info, e.g. datarec is expected size */
+	map_expect.key_size    = sizeof(__u32);
+	map_expect.value_size  = sizeof(struct datarec);
+	map_expect.max_entries = XDP_ACTION_MAX;
+	err = check_map_fd_info(&info, &map_expect);
+	if (err) {
+		fprintf(stderr, "ERR: map via FD not compatible\n");
+		return false;
+	}
+	old_map_id = info.id;
+	*map_fd = new_fd;
+	return true;
+}
+static void stats_poll(int fd, __u32 map_type, int interval, char *pin_dir)
 {
 	struct stats_record prev, record = { 0 };
 
 	/* Trick to pretty printf with thousands separators use %' */
 	setlocale(LC_NUMERIC, "en_US");
 
+	int map_fd = fd;
 	/* Get initial reading quickly */
 	stats_collect(map_fd, map_type, &record);
 	usleep(1000000/4);
 
 	while (1) {
+		int key;
 		prev = record; /* struct copy */
 		stats_collect(map_fd, map_type, &record);
+#if 0
+	struct stats_record tmp_record  = { 0 };
+	static struct stats_record  base_record = { 0 };
+		for (key = 0; key < XDP_ACTION_MAX; key++) {
+			record.stats[key].total.rx_packets += base_record.stats[key].total.rx_packets;
+			record.stats[key].total.rx_bytes += base_record.stats[key].total.rx_bytes;
+			printf("next pkt %llu, bytes %llu \n", base_record.stats[key].total.rx_packets, base_record.stats[key].total.rx_bytes);
+		}
+		if (detect_new_map_id(&map_fd, pin_dir)) {
+			base_record = record;
+			stats_collect(map_fd, map_type, &tmp_record);
+			for (key = 0; key < XDP_ACTION_MAX; key++) {
+				record.stats[key].total.rx_packets += tmp_record.stats[key].total.rx_packets;
+				record.stats[key].total.rx_bytes += tmp_record.stats[key].total.rx_bytes;
+			}
+		}
+#endif
 		stats_print(&record, &prev);
 		sleep(interval);
 	}
 }
+
 
 #ifndef PATH_MAX
 #define PATH_MAX	4096
@@ -251,6 +300,7 @@ int main(int argc, char **argv)
 	if (stats_map_fd < 0) {
 		return EXIT_FAIL_BPF;
 	}
+	old_map_id = info.id;
 
 	/* check map info, e.g. datarec is expected size */
 	map_expect.key_size    = sizeof(__u32);
@@ -270,6 +320,6 @@ int main(int argc, char **argv)
 		       );
 	}
 
-	stats_poll(stats_map_fd, info.type, interval);
+	stats_poll(stats_map_fd, info.type, interval, pin_dir);
 	return EXIT_OK;
 }
