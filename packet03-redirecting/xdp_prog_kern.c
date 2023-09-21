@@ -34,6 +34,10 @@ static __always_inline void swap_src_dst_mac(struct ethhdr *eth)
 {
 	/* Assignment 1: swap source and destination addresses in the eth.
 	 * For simplicity you can use the memcpy macro defined above */
+	unsigned char  tmp[ETH_ALEN];
+	memcpy(tmp, eth->h_source, ETH_ALEN);
+	memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
+	memcpy(eth->h_dest, tmp, ETH_ALEN);
 }
 
 static __always_inline void swap_src_dst_ipv6(struct ipv6hdr *ipv6)
@@ -43,7 +47,35 @@ static __always_inline void swap_src_dst_ipv6(struct ipv6hdr *ipv6)
 
 static __always_inline void swap_src_dst_ipv4(struct iphdr *iphdr)
 {
-	/* Assignment 1: swap source and destination addresses in the iphdr */
+	int tmp =  iphdr->saddr;
+	iphdr->saddr = iphdr->daddr;
+	iphdr->daddr = tmp;
+}
+
+static __always_inline __u16 csum_fold_helper(__u32 csum)
+{
+	__u32 sum;
+	sum = (csum >> 16) + (csum & 0xffff);
+	sum += (sum >> 16);
+	return ~sum;
+}
+
+/*
+ * The icmp_checksum_diff function takes pointers to old and new structures and
+ * the old checksum and returns the new checksum.  It uses the bpf_csum_diff
+ * helper to compute the checksum difference. Note that the sizes passed to the
+ * bpf_csum_diff helper should be multiples of 4, as it operates on 32-bit
+ * words.
+ */
+static __always_inline __u16 icmp_checksum_diff(
+		__u16 seed,
+		struct icmphdr_common *icmphdr_new,
+		struct icmphdr_common *icmphdr_old)
+{
+	__u32 csum, size = sizeof(struct icmphdr_common);
+
+	csum = bpf_csum_diff((__be32 *)icmphdr_old, size, (__be32 *)icmphdr_new, size, seed);
+	return csum_fold_helper(csum);
 }
 
 /* Implement packet03/assignment-1 in this section */
@@ -61,6 +93,7 @@ int xdp_icmp_echo_func(struct xdp_md *ctx)
 	struct ipv6hdr *ipv6hdr;
 	__u16 echo_reply;
 	struct icmphdr_common *icmphdr;
+	struct icmphdr_common old_icmphdr;
 	__u32 action = XDP_PASS;
 
 	/* These keep track of the next header type and iterator pointer */
@@ -91,6 +124,8 @@ int xdp_icmp_echo_func(struct xdp_md *ctx)
 		/* Swap IP source and destination */
 		swap_src_dst_ipv4(iphdr);
 		echo_reply = ICMP_ECHOREPLY;
+		
+
 	} else if (eth_type == bpf_htons(ETH_P_IPV6)
 		   && icmp_type == ICMPV6_ECHO_REQUEST) {
 		/* Swap IPv6 source and destination */
@@ -105,6 +140,12 @@ int xdp_icmp_echo_func(struct xdp_md *ctx)
 
 	/* Assignment 1: patch the packet and update the checksum. You can use
 	 * the echo_reply variable defined above to fix the ICMP Type field. */
+	__u16 old_csum = icmphdr->cksum;
+	icmphdr->cksum = 0;
+	old_icmphdr = *icmphdr;
+	icmphdr->type = echo_reply;
+	icmphdr->cksum = icmp_checksum_diff(~old_csum, icmphdr, &old_icmphdr);
+
 
 	bpf_printk("echo_reply: %d", echo_reply);
 
