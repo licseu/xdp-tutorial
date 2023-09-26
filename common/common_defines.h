@@ -23,6 +23,9 @@ struct config {
 	char progname[32];
 	char src_mac[18];
 	char dest_mac[18];
+	__u32 saddr;
+	__u32 daddr;
+	__u16 ops;
 	__u16 xsk_bind_flags;
 	int xsk_if_queue;
 	bool xsk_poll_mode;

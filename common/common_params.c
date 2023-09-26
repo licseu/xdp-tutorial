@@ -9,6 +9,7 @@
 #include <net/if.h>
 #include <linux/if_link.h> /* XDP_FLAGS_* depend on kernel-headers installed */
 #include <linux/if_xdp.h>
+#include <arpa/inet.h>
 
 #include "common_params.h"
 
@@ -85,6 +86,8 @@ void parse_cmdline_args(int argc, char **argv,
 	int longindex = 0;
 	char *dest;
 	int opt;
+	in_addr_t ip;
+
 
 	if (option_wrappers_to_options(options_wrapper, &long_options)) {
 		fprintf(stderr, "Unable to malloc()\n");
@@ -94,6 +97,7 @@ void parse_cmdline_args(int argc, char **argv,
 	/* Parse commands line args */
 	while ((opt = getopt_long(argc, argv, "hd:r:L:R:ASNFU:MQ:czpq",
 				  long_options, &longindex)) != -1) {
+		printf("DEBUG opt %d, %s\n", opt, optarg);
 		switch (opt) {
 		case 'd':
 			if (strlen(optarg) >= IF_NAMESIZE) {
@@ -182,6 +186,34 @@ void parse_cmdline_args(int argc, char **argv,
 		case 4: /* --unload-all */
 			cfg->unload_all = true;
 			break;
+		case '5': /* --ops */
+			if (strncmp(optarg, "add", 3) == 0) {
+				cfg->ops = ENUM_OPS_ADD;
+			} else if (strncmp(optarg, "del", 3) == 0) {
+				cfg->ops = ENUM_OPS_DEL;
+			} else if (strncmp(optarg, "get", 3) == 0) {
+				cfg->ops = ENUM_OPS_GET;
+			} else if (strncmp(optarg, "dump", 4) == 0) {
+				cfg->ops = ENUM_OPS_GET;
+			} else {
+				goto error;
+			}
+			break;
+		case '6': /* --src-ip */
+			ip =  (uint32_t)inet_addr(optarg);
+			if (ip == INADDR_NONE) {
+				goto error;
+			}
+			cfg->saddr = ip;
+			break;
+		case '7': /* --dst-ip */
+			ip =  (uint32_t)inet_addr(optarg);
+			if (ip == INADDR_NONE) {
+				goto error;
+			}
+			cfg->daddr = ip;
+			break;
+
 		case 'h':
 			full_help = true;
 			/* fall-through */

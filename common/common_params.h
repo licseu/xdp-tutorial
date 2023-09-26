@@ -5,6 +5,15 @@
 #include <getopt.h>
 #include "common_defines.h"
 
+enum ops_type {
+  ENUM_OPS_UNKOWN = 0,
+  ENUM_OPS_ADD = 1,
+  ENUM_OPS_DEL = 2,
+  ENUM_OPS_GET = 3,
+  ENUM_OPS_DUMP = 4,
+  ENUM_OPS_MAX = ENUM_OPS_DUMP,
+};
+
 struct option_wrapper {
   struct option option;
   char *help;

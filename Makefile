@@ -12,7 +12,7 @@ MAKEFLAGS += --no-print-directory
 Q = @
 endif
 
-LESSONS = $(wildcard basic*) $(wildcard packet*) $(wildcard tracing??-*)
+LESSONS = $(wildcard basic*) $(wildcard packet*) $(wildcard tracing??-*) $(wildcard fdrop*)
 # LESSONS += advanced03-AF_XDP
 LESSONS_CLEAN = $(addsuffix _clean,$(LESSONS))
 
