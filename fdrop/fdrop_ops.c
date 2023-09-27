@@ -50,7 +50,9 @@ static const struct option_wrapper long_options[] = {
 };
 
 #define FDROP_MAX_IP_STR_LEN 16
-void u32_to_ip_str(uint32_t ip, char* str) {
+void u32_to_ip_str(uint32_t sip, char* str) {
+	int ip = ntohl(sip);
+
     sprintf(str, "%u.%u.%u.%u",
         (ip >> 24) & 0xFF,
         (ip >> 16) & 0xFF,
@@ -78,14 +80,19 @@ static inline int fdrop_map_add(int fdrop_map_fd, __u32 addr) {
 }
 
 static inline int fdrop_map_del(int fdrop_map_fd, __u32 addr) {
-	__u64 value = 0;
 	int rtn;
 	char ip_str[FDROP_MAX_IP_STR_LEN];
 	
 	u32_to_ip_str(addr, ip_str);
-	rtn = bpf_map_lookup_and_delete_elem(fdrop_map_fd, &addr, &value);
+
+	rtn = bpf_map_delete_elem(fdrop_map_fd, &addr);
 	if (rtn != 0) {
-		printf("failed to delete addr %s from fdrop map: %s\n", ip_str, strerror(errno));
+		if (errno == ENOENT) {
+			printf("addr %s doesn't exist in fdrop map\n", ip_str);
+			rtn = 0;
+		} else {
+			printf("failed to delete addr %s from fdrop map: %s\n", ip_str, strerror(errno));
+		}
 	} else {
 		printf("success to delete addr %s from fdrop map\n", ip_str);
 	}
@@ -109,13 +116,13 @@ static inline int fdrop_map_get(int fdrop_map_fd, __u32 addr) {
 
 static int fdrop_map_dump(int fdrop_map_fd) {
 	__u64 value = 0;
-	void *pkey = NULL;
-	void *ckey = NULL;
-	while(bpf_map_get_next_key(fdrop_map_fd, pkey, ckey) == 0) {
+	__u32 key = 0;
+	__u32 next_key;
+	while(bpf_map_get_next_key(fdrop_map_fd, &key, &next_key) == 0) {
 		char ip_str[FDROP_MAX_IP_STR_LEN];
-		bpf_map_lookup_elem(fdrop_map_fd, ckey, &value);
-		pkey = ckey;
-		/*u32_to_ip_str(*(uint32_t *)ckey, ip_str);*/
+		bpf_map_lookup_elem(fdrop_map_fd, &next_key, &value);
+		key = next_key;
+		u32_to_ip_str(key, ip_str);
 		printf("addr %-16s, counter: %llu\n", ip_str, value);
 	}
 	return 0;

@@ -194,7 +194,7 @@ void parse_cmdline_args(int argc, char **argv,
 			} else if (strncmp(optarg, "get", 3) == 0) {
 				cfg->ops = ENUM_OPS_GET;
 			} else if (strncmp(optarg, "dump", 4) == 0) {
-				cfg->ops = ENUM_OPS_GET;
+				cfg->ops = ENUM_OPS_DUMP;
 			} else {
 				goto error;
 			}
